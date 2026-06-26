@@ -44,35 +44,57 @@ export function SearchCriteria({ queryId, initial, sym, canEdit }: Props) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [c, setC] = useState<Criteria>(initial);
   const [draft, setDraft] = useState<Criteria>(initial);
 
   const startEdit = () => {
     setDraft(c);
     setError('');
+    setNotice('');
     setEditing(true);
   };
 
   const save = async () => {
     setSaving(true);
     setError('');
+    const criteria = {
+      timePreference: draft.timePreference,
+      maxStops: draft.maxStops,
+      maxPrice: draft.maxPrice,
+      maxDurationHours: draft.maxDurationHours,
+      cabinClass: draft.cabinClass,
+      preferredAirlines: draft.preferredAirlines,
+    };
     try {
+      // Preview how many stored flights the new criteria would erase, and warn.
+      const dry = await fetch(`/api/queries/${queryId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...criteria, dryRun: true }),
+      });
+      const dj = await dry.json();
+      const wouldDelete: number = dry.ok && dj.ok ? dj.data.wouldDelete ?? 0 : 0;
+      if (wouldDelete > 0) {
+        const ok = window.confirm(
+          `Changing the search criteria will permanently delete ${wouldDelete} stored result${wouldDelete === 1 ? '' : 's'} that no longer match (e.g. afternoon flights if you switch to morning-only). This can't be undone. Continue?`,
+        );
+        if (!ok) {
+          setSaving(false);
+          return;
+        }
+      }
       const res = await fetch(`/api/queries/${queryId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          timePreference: draft.timePreference,
-          maxStops: draft.maxStops,
-          maxPrice: draft.maxPrice,
-          maxDurationHours: draft.maxDurationHours,
-          cabinClass: draft.cabinClass,
-          preferredAirlines: draft.preferredAirlines,
-        }),
+        body: JSON.stringify(criteria),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || 'Failed to save');
       setC(draft);
       setEditing(false);
+      const del: number = json.data?.deleted ?? 0;
+      setNotice(del > 0 ? `Saved — removed ${del} result${del === 1 ? '' : 's'} that no longer match.` : 'Saved.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save');
     } finally {
@@ -106,7 +128,8 @@ export function SearchCriteria({ queryId, initial, sym, canEdit }: Props) {
               <span key={i} className={styles.chip}>{label}</span>
             ))}
           </div>
-          <p className={styles.note}>What the AI scrapes from Google Flights. Changes apply on the next scrape.</p>
+          <p className={styles.note}>What the AI scrapes from Google Flights. Changing it deletes stored results that no longer match.</p>
+          {notice && <p className={styles.notice}>{notice}</p>}
         </>
       ) : (
         <div className={styles.form}>

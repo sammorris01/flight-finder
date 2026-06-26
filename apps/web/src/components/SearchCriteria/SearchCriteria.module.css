@@ -56,6 +56,12 @@
   color: var(--muted);
 }
 
+.notice {
+  margin: 6px 0 0;
+  font-size: var(--text-sm);
+  color: var(--accent);
+}
+
 .form {
   display: flex;
   flex-wrap: wrap;

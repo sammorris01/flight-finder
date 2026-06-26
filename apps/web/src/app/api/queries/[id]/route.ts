@@ -3,6 +3,7 @@ import { apiSuccess, apiError } from '@/lib/api-response';
 import { prisma } from '@/lib/prisma';
 import { authorizeMutation } from '@/lib/query-auth';
 import { isAggregatorSource } from '@/lib/scraper/navigate';
+import { flightMatchesCriteria, type SearchCriteria } from '@/lib/flight-criteria';
 
 const ALLOWED_INTERVALS = [1, 3, 6, 12, 24];
 
@@ -17,7 +18,16 @@ export async function PATCH(
 
   const query = await prisma.query.findUnique({
     where: { id },
-    select: { deleteToken: true, groupId: true, userId: true },
+    select: {
+      deleteToken: true,
+      groupId: true,
+      userId: true,
+      timePreference: true,
+      maxStops: true,
+      maxPrice: true,
+      maxDurationHours: true,
+      preferredAirlines: true,
+    },
   });
 
   if (!query) return apiError('Tracker not found', 404);
@@ -155,6 +165,32 @@ export async function PATCH(
     idsToUpdate.push(...siblings.map((s) => s.id));
   }
 
+  // Changing the search criteria erases stored flights that no longer match.
+  // Work out which would go (so the UI can warn with a count); `dryRun` previews
+  // the count without applying anything.
+  const criteriaKeys = ['timePreference', 'maxStops', 'maxPrice', 'maxDurationHours', 'preferredAirlines'] as const;
+  const criteriaChanged = criteriaKeys.some((k) => Object.prototype.hasOwnProperty.call(cascadeData, k));
+  const has = (k: string) => Object.prototype.hasOwnProperty.call(cascadeData, k);
+  let nonMatchingIds: string[] = [];
+  if (criteriaChanged) {
+    const effective: SearchCriteria = {
+      timePreference: cascadeData.timePreference ?? query.timePreference,
+      maxStops: has('maxStops') ? cascadeData.maxStops ?? null : query.maxStops,
+      maxPrice: has('maxPrice') ? cascadeData.maxPrice ?? null : query.maxPrice,
+      maxDurationHours: has('maxDurationHours') ? cascadeData.maxDurationHours ?? null : query.maxDurationHours,
+      preferredAirlines: cascadeData.preferredAirlines ?? query.preferredAirlines,
+    };
+    const snaps = await prisma.priceSnapshot.findMany({
+      where: { queryId: { in: idsToUpdate } },
+      select: { id: true, departureTime: true, stops: true, price: true, airline: true, duration: true },
+    });
+    nonMatchingIds = snaps.filter((s) => !flightMatchesCriteria(s, effective)).map((s) => s.id);
+  }
+
+  if (body?.dryRun === true) {
+    return apiSuccess({ wouldDelete: nonMatchingIds.length });
+  }
+
   if (Object.keys(cascadeData).length > 0) {
     await prisma.query.updateMany({
       where: { id: { in: idsToUpdate } },
@@ -169,7 +205,11 @@ export async function PATCH(
     });
   }
 
-  return apiSuccess({ ...cascadeData, ...singleRowData, updated: idsToUpdate.length });
+  if (nonMatchingIds.length > 0) {
+    await prisma.priceSnapshot.deleteMany({ where: { id: { in: nonMatchingIds } } });
+  }
+
+  return apiSuccess({ ...cascadeData, ...singleRowData, updated: idsToUpdate.length, deleted: nonMatchingIds.length });
 }
 
 export async function DELETE(
