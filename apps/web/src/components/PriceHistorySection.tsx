@@ -4,8 +4,27 @@ import { useState } from 'react';
 import { currencySymbol } from '@/lib/currency';
 import { safeHttpUrl } from '@/lib/safe-url';
 import { useHydrated } from '@/lib/use-hydrated';
+import { useTrackerView } from '@/lib/useTrackerView';
 import styles from './PriceHistory.module.css';
 import type { Snapshot } from './PriceHistory';
+
+function EyeIcon({ off }: { off: boolean }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+      {off ? (
+        <>
+          <path d="M1 8s2.5-5 7-5c1 0 1.9.2 2.7.5M14.6 9.6C13.3 11.3 11 13 8 13 3.5 13 1 8 1 8" />
+          <path d="M2 2l12 12" />
+        </>
+      ) : (
+        <>
+          <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" />
+          <circle cx="8" cy="8" r="2" />
+        </>
+      )}
+    </svg>
+  );
+}
 
 // The full-history log can run to flights x scrapes rows. Collapsed by default;
 // when expanded this bounds the DOM, and the note row reports anything trimmed.
@@ -99,13 +118,30 @@ function FlightRow({
   s,
   previous,
   showDate,
+  hidden,
+  onToggle,
 }: {
   s: Snapshot;
   previous: Snapshot | null;
   showDate: boolean;
+  hidden?: boolean;
+  onToggle?: () => void;
 }) {
   return (
-    <tr>
+    <tr className={hidden ? styles.hiddenRow : undefined}>
+      {onToggle && (
+        <td className={styles.toggleCell}>
+          <button
+            type="button"
+            className={styles.eyeBtn}
+            onClick={onToggle}
+            aria-label={hidden ? 'Show this flight on the chart' : 'Hide this flight from the chart'}
+            title={hidden ? 'Show on chart' : 'Hide from chart'}
+          >
+            <EyeIcon off={Boolean(hidden)} />
+          </button>
+        </td>
+      )}
       {showDate && <td className={styles.date}><ScrapeTime iso={s.scrapedAt} /></td>}
       <td>{flightName(s)}</td>
       <td className={styles.times}>{timesLabel(s)}</td>
@@ -144,20 +180,32 @@ function FlightRow({
  * lifetime-cheapest price, so flights last seen days ago interleaved with live
  * ones and it was impossible to read today's situation at a glance.
  */
-export function PriceHistorySection({ snapshots }: { snapshots: Snapshot[] }) {
+export function PriceHistorySection({ snapshots, trackerId }: { snapshots: Snapshot[]; trackerId?: string }) {
   const [expanded, setExpanded] = useState(false);
+  const { isHidden, toggle, passes } = useTrackerView(trackerId);
   if (snapshots.length === 0) return null;
 
-  const previousMap = buildPreviousMap(snapshots);
+  // Apply the active departure/arrival/stops filters. Hidden flights stay (just
+  // dimmed); a flight that FAILS a filter is dropped from the list entirely.
+  const filtered = snapshots.filter((s) => passes(s));
+  if (filtered.length === 0) {
+    return (
+      <div className={styles.section}>
+        <div className={styles.caption}>No flights match the current filters.</div>
+      </div>
+    );
+  }
+
+  const previousMap = buildPreviousMap(filtered);
 
   // Latest scrape: every snapshot stamped with the most recent scrapedAt. One
   // createMany per run shares a timestamp, so this is exactly that run's flights.
-  const latestScrapedAt = snapshots.reduce(
+  const latestScrapedAt = filtered.reduce(
     (max, s) => (s.scrapedAt > max ? s.scrapedAt : max),
-    snapshots[0]!.scrapedAt,
+    filtered[0]!.scrapedAt,
   );
   const current = Array.from(
-    snapshots
+    filtered
       .filter((s) => s.scrapedAt === latestScrapedAt)
       .reduce((m, s) => {
         const existing = m.get(flightKey(s));
@@ -167,13 +215,13 @@ export function PriceHistorySection({ snapshots }: { snapshots: Snapshot[] }) {
       .values(),
   ).sort((a, b) => (a.price !== b.price ? a.price - b.price : a.airline.localeCompare(b.airline)));
 
-  const history = [...snapshots].sort((a, b) => {
+  const history = [...filtered].sort((a, b) => {
     const t = new Date(b.scrapedAt).getTime() - new Date(a.scrapedAt).getTime();
     return t !== 0 ? t : a.price - b.price;
   });
   const shownHistory = history.slice(0, MAX_HISTORY_ROWS);
   const hiddenCount = history.length - shownHistory.length;
-  const hasHistory = snapshots.length > current.length;
+  const hasHistory = filtered.length > current.length;
 
   return (
     <div className={styles.section}>
@@ -185,6 +233,7 @@ export function PriceHistorySection({ snapshots }: { snapshots: Snapshot[] }) {
         <table className={styles.table}>
           <thead>
             <tr>
+              <th className={styles.toggleHead} aria-label="Show or hide on chart"></th>
               <th>Airline</th>
               <th>Times</th>
               <th>Price</th>
@@ -195,9 +244,19 @@ export function PriceHistorySection({ snapshots }: { snapshots: Snapshot[] }) {
             </tr>
           </thead>
           <tbody>
-            {current.map((s) => (
-              <FlightRow key={s.id} s={s} previous={previousMap.get(s.id) ?? null} showDate={false} />
-            ))}
+            {current.map((s) => {
+              const k = flightKey(s);
+              return (
+                <FlightRow
+                  key={s.id}
+                  s={s}
+                  previous={previousMap.get(s.id) ?? null}
+                  showDate={false}
+                  hidden={isHidden(k)}
+                  onToggle={() => toggle(k)}
+                />
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -209,7 +268,7 @@ export function PriceHistorySection({ snapshots }: { snapshots: Snapshot[] }) {
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
         >
-          {expanded ? 'Hide full history' : `Show full history (${snapshots.length} checks)`}
+          {expanded ? 'Hide full history' : `Show full history (${filtered.length} checks)`}
         </button>
       )}
 
@@ -230,7 +289,13 @@ export function PriceHistorySection({ snapshots }: { snapshots: Snapshot[] }) {
             </thead>
             <tbody>
               {shownHistory.map((s) => (
-                <FlightRow key={s.id} s={s} previous={previousMap.get(s.id) ?? null} showDate />
+                <FlightRow
+                  key={s.id}
+                  s={s}
+                  previous={previousMap.get(s.id) ?? null}
+                  showDate
+                  hidden={isHidden(flightKey(s))}
+                />
               ))}
               {hiddenCount > 0 && (
                 <tr>

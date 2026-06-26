@@ -1,0 +1,133 @@
+.root {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.editBtn {
+  padding: 4px 12px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.editBtn:hover {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  padding: 4px 10px;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.note {
+  margin: 8px 0 0;
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 140px;
+}
+.field.wide {
+  flex-basis: 100%;
+}
+.label {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.select,
+.input {
+  padding: 7px 9px;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.select:focus,
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.error {
+  flex-basis: 100%;
+  font-size: var(--text-sm);
+  color: var(--price-up);
+}
+
+.actions {
+  flex-basis: 100%;
+  display: flex;
+  gap: var(--space-sm);
+}
+.save {
+  padding: 8px 16px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.save:hover {
+  background: var(--accent-hover);
+}
+.save:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.cancel {
+  padding: 8px 16px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.cancel:hover {
+  color: var(--text);
+}

@@ -1,12 +1,25 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState, type ComponentType } from 'react';
 import dynamic from 'next/dynamic';
 import { currencySymbol } from '@/lib/currency';
 import { safeHttpUrl } from '@/lib/safe-url';
+import { useTrackerView } from '@/lib/useTrackerView';
 import styles from './PriceChart.module.css';
 
-const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
+// react-plotly.js's bundled types don't export PlotParams or the legend-click
+// events, so type just the props we actually pass (the events are supported at
+// runtime). `data`/`layout`/`config` stay loose — Plotly validates them anyway.
+type PlotlyGraphDiv = { data?: Array<{ meta?: string; visible?: boolean | string }> };
+const Plot = dynamic(() => import('react-plotly.js'), { ssr: false }) as unknown as ComponentType<{
+  data: unknown[];
+  layout?: unknown;
+  config?: unknown;
+  style?: Record<string, string | number>;
+  onClick?: (data: { points: Array<{ customdata?: unknown }> }) => void;
+  onInitialized?: (figure: unknown, graphDiv: PlotlyGraphDiv) => void;
+  onRestyle?: () => void;
+}>;
 
 interface Snapshot {
   id: string;
@@ -29,20 +42,12 @@ interface Snapshot {
 
 type ChartView = 'all' | 'local' | 'comparison' | string; // string = specific country code
 
-const AIRLINE_COLORS: Record<string, string> = {
-  Delta: '#e31837',
-  United: '#002244',
-  American: '#0078d2',
-  'Air France': '#002157',
-  Southwest: '#ffbf27',
-  JetBlue: '#003876',
-  Spirit: '#ffe600',
-  Alaska: '#01426a',
-  British: '#2e5c99',
-  Lufthansa: '#05164d',
-  Emirates: '#d71a21',
-  KLM: '#00a1de',
-};
+// Distinct colors cycled per flight (departure), so each tracked flight is its
+// own clearly-separable line rather than every airline collapsing to one color.
+const FLIGHT_COLORS = [
+  '#80a8a5', '#c1272d', '#d4a574', '#8b5cf6', '#ec4899', '#14b8a6',
+  '#3b82f6', '#f97316', '#22c55e', '#eab308', '#a855f7', '#06b6d4',
+];
 
 const COUNTRY_COLORS = ['#80a8a5', '#c1272d', '#d4a574', '#8b5cf6', '#ec4899', '#14b8a6', '#3b82f6', '#f97316'];
 
@@ -50,41 +55,82 @@ function countryFlag(code: string): string {
   return String.fromCodePoint(...code.split('').map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
 }
 
-function getAirlineColor(airline: string, index: number): string {
-  for (const [key, color] of Object.entries(AIRLINE_COLORS)) {
-    if (airline.toLowerCase().includes(key.toLowerCase())) return color;
-  }
-  const fallback = ['#80a8a5', '#c1272d', '#d4a574', '#8b5cf6', '#ec4899', '#14b8a6', '#3b82f6', '#f97316'];
-  return fallback[index % fallback.length]!;
+/** Parse a "6:40 AM" / "1:55 PM" departure label into minutes-from-midnight so
+ * flights sort in schedule order. Missing/unparseable times sort last. */
+function departureMinutes(t: string | null | undefined): number {
+  if (!t) return Number.MAX_SAFE_INTEGER;
+  const m = t.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  if (!m) return Number.MAX_SAFE_INTEGER;
+  let h = parseInt(m[1]!, 10);
+  const min = parseInt(m[2]!, 10);
+  const ap = m[3]?.toUpperCase();
+  if (ap === 'PM' && h !== 12) h += 12;
+  if (ap === 'AM' && h === 12) h = 0;
+  return h * 60 + min;
+}
+
+/** A UTC ISO scrape timestamp → naive local "YYYY-MM-DD HH:MM:SS" so Plotly's
+ * x-axis shows the viewer's own wall-clock time. Plotly.js does not localize
+ * timezones, so without this it renders the raw UTC time (off by the local
+ * offset, e.g. ~1h on BST). Flight departure/arrival times are left untouched —
+ * those are airport-local by aviation convention. */
+function toLocalAxis(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
 function buildDetailTraces(snapshots: Snapshot[], sym: string, hasVpnData: boolean) {
-  const available = snapshots.filter((s) => s.status !== 'sold_out');
-  const soldOut = snapshots.filter((s) => s.status === 'sold_out');
+  // Chart only identifiable individual flights: one line per departure (flightId),
+  // grouped under its airline in the legend. Snapshots with no flight identity
+  // (early scrapes where the departure couldn't be read) are dropped from the
+  // detail view rather than collapsed into a confusing bare-airline line.
+  const available = snapshots.filter((s) => s.status !== 'sold_out' && s.flightId);
 
   const byGroup = new Map<string, Snapshot[]>();
   for (const s of available) {
-    const key = hasVpnData && s.vpnCountry ? `${s.airline} (${s.vpnCountry})` : s.airline;
+    const fid = s.flightId!; // guaranteed by the filter above
+    const key = hasVpnData && s.vpnCountry ? `${fid} (${s.vpnCountry})` : fid;
     const existing = byGroup.get(key) ?? [];
     existing.push(s);
     byGroup.set(key, existing);
   }
 
+  // Sort points chronologically (clean left→right line), then order the series by
+  // airline and, within an airline, by departure time so each carrier's flights
+  // read top-to-bottom in schedule order.
+  const groups = Array.from(byGroup.values())
+    .map((points) => [...points].sort((a, b) => a.scrapedAt.localeCompare(b.scrapedAt)))
+    .sort((a, b) => {
+      const byAirline = (a[0]?.airline ?? '').localeCompare(b[0]?.airline ?? '');
+      if (byAirline !== 0) return byAirline;
+      return departureMinutes(a[0]?.departureTime) - departureMinutes(b[0]?.departureTime);
+    });
+
   let idx = 0;
-  const result = Array.from(byGroup.entries()).map(([group, points]) => {
-    const baseAirline = points[0]?.airline ?? group;
-    const color = getAirlineColor(baseAirline, idx++);
+  const result = groups.map((points) => {
+    const first = points[0];
+    const airline = first?.airline ?? 'Flight';
+    const time = first?.departureTime ?? 'time n/a';
+    const vpn = hasVpnData && first?.vpnCountry ? ` (${first.vpnCountry})` : '';
+    const color = FLIGHT_COLORS[idx++ % FLIGHT_COLORS.length]!;
     return {
-      x: points.map((p) => p.scrapedAt),
+      x: points.map((p) => toLocalAxis(p.scrapedAt)),
       y: points.map((p) => p.price),
       type: 'scatter' as const,
       mode: 'lines+markers' as const,
-      name: group,
+      // Grouped under an airline heading, so the entry only needs the departure time.
+      name: `${time}${vpn}`,
+      legendgroup: airline,
+      legendgrouptitle: { text: airline },
+      // Stable id (flightId) shared with the Price History list for visibility sync.
+      meta: first?.flightId ?? `${airline}-${time}`,
       line: { color, width: 2 },
       marker: { color, size: 6 },
       customdata: points.map((p) => [p.bookingUrl]),
       text: points.map((p) => {
         const lines = [
+          `<b>${airline} · ${p.departureTime ?? time}</b>`,
           `<b>${sym}${p.price.toFixed(2)}</b> ${p.currency}`,
           new Date(p.scrapedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
         ];
@@ -96,33 +142,9 @@ function buildDetailTraces(snapshots: Snapshot[], sym: string, hasVpnData: boole
         if (p.vpnCountry) lines.push(`${countryFlag(p.vpnCountry)} Scraped from ${p.vpnCountry}`);
         return lines.join('<br>');
       }),
-      hovertemplate: '%{text}<extra>%{fullData.name}</extra>',
+      hovertemplate: '%{text}<extra></extra>',
     };
   });
-
-  if (soldOut.length > 0) {
-    result.push({
-      x: soldOut.map((p) => p.scrapedAt),
-      y: soldOut.map((p) => p.price),
-      type: 'scatter' as const,
-      mode: 'lines+markers' as const,
-      name: 'Sold out',
-      line: { color: '#ef4444', width: 0 },
-      marker: { color: '#ef4444', size: 10 },
-      customdata: soldOut.map((p) => [p.bookingUrl]),
-      text: soldOut.map((p) => {
-        const lines = [
-          `<b>${sym}${p.price.toFixed(2)}</b> (sold out)`,
-          new Date(p.scrapedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
-        ];
-        if (p.departureTime || p.arrivalTime) {
-          lines.push(`${p.departureTime ?? '?'} - ${p.arrivalTime ?? '?'}`);
-        }
-        return lines.join('<br>');
-      }),
-      hovertemplate: '%{text}<extra>Sold out</extra>',
-    });
-  }
 
   return result;
 }
@@ -161,7 +183,7 @@ function buildComparisonTraces(snapshots: Snapshot[], sym: string) {
     idx++;
 
     return {
-      x: cheapest.map((p) => p.scrapedAt),
+      x: cheapest.map((p) => toLocalAxis(p.scrapedAt)),
       y: cheapest.map((p) => p.price),
       type: 'scatter' as const,
       mode: 'lines+markers' as const,
@@ -182,7 +204,15 @@ function buildComparisonTraces(snapshots: Snapshot[], sym: string) {
   });
 }
 
-export function PriceChart({ snapshots, currency = 'USD' }: { snapshots: Snapshot[]; currency?: string }) {
+export function PriceChart({
+  snapshots,
+  currency = 'USD',
+  trackerId,
+}: {
+  snapshots: Snapshot[];
+  currency?: string;
+  trackerId?: string;
+}) {
   const sym = currencySymbol(currency);
 
   // Detect VPN data and available countries
@@ -197,6 +227,14 @@ export function PriceChart({ snapshots, currency = 'USD' }: { snapshots: Snapsho
   const hasVpnData = vpnCountries.length > 0;
   const [view, setView] = useState<ChartView>('all');
 
+  // Per-tracker hidden-flight state, shared with the Price History list (keyed by
+  // flightId) so the chart legend and the list toggle together and persist.
+  const { hidden: hiddenKeys, setHidden: saveHidden, passes } = useTrackerView(trackerId);
+
+  // The live Plotly graph div, captured once, so onRestyle can read the actual
+  // per-trace visibility after any legend interaction.
+  const graphRef = useRef<PlotlyGraphDiv | null>(null);
+
   // Filter snapshots based on selected view
   const filteredSnapshots = useMemo(() => {
     if (view === 'all') return snapshots;
@@ -206,12 +244,27 @@ export function PriceChart({ snapshots, currency = 'USD' }: { snapshots: Snapsho
     return snapshots.filter((s) => s.vpnCountry === view);
   }, [snapshots, view]);
 
+  // Apply the active departure/arrival/stops filters: a flight that fails drops
+  // off the chart entirely (consistent with the Results list and Best Price).
+  const viewSnapshots = useMemo(() => filteredSnapshots.filter((s) => passes(s)), [filteredSnapshots, passes]);
+
   const traces = useMemo(() => {
     if (view === 'comparison') {
-      return buildComparisonTraces(filteredSnapshots, sym);
+      return buildComparisonTraces(viewSnapshots, sym);
     }
-    return buildDetailTraces(filteredSnapshots, sym, hasVpnData && view === 'all');
-  }, [filteredSnapshots, sym, view, hasVpnData]);
+    return buildDetailTraces(viewSnapshots, sym, hasVpnData && view === 'all');
+  }, [viewSnapshots, sym, view, hasVpnData]);
+
+  // Apply remembered visibility: a hidden flight renders as `legendonly`.
+  const displayTraces = useMemo(
+    () =>
+      traces.map((t) => {
+        const key = (t as { meta?: string }).meta;
+        if (!key) return t;
+        return { ...t, visible: hiddenKeys.has(key) ? ('legendonly' as const) : (true as const) };
+      }),
+    [traces, hiddenKeys],
+  );
 
   if (snapshots.length === 0) {
     return (
@@ -245,7 +298,7 @@ export function PriceChart({ snapshots, currency = 'USD' }: { snapshots: Snapsho
         </div>
       )}
       <Plot
-        data={traces}
+        data={displayTraces}
         layout={{
           paper_bgcolor: 'transparent',
           plot_bgcolor: 'transparent',
@@ -265,6 +318,9 @@ export function PriceChart({ snapshots, currency = 'USD' }: { snapshots: Snapsho
             orientation: 'h',
             y: -0.15,
             font: { size: 11 },
+            // Clicking a flight toggles just that flight; clicking the airline
+            // heading toggles the whole group.
+            groupclick: 'toggleitem',
           },
           // Opaque hover box. The unified label otherwise inherits the
           // transparent paper_bgcolor, so the x axis date ticks bled through
@@ -290,6 +346,27 @@ export function PriceChart({ snapshots, currency = 'USD' }: { snapshots: Snapsho
             const url = safeHttpUrl((point.customdata as string[])[0]);
             if (url) window.open(url, '_blank', 'noopener,noreferrer');
           }
+        }}
+        onInitialized={(_figure, graphDiv) => {
+          graphRef.current = graphDiv;
+        }}
+        onRestyle={() => {
+          // After any legend interaction — single flight, airline heading (group),
+          // or double-click — read the chart's actual per-trace visibility and
+          // mirror it into the shared state, so the Price History list and
+          // persistence track every kind of toggle. 'legendonly' = hidden via legend.
+          const data = graphRef.current?.data;
+          if (!data) return;
+          // Start from the existing hidden set so flights NOT currently plotted
+          // (filtered out) keep their state; only update the plotted ones.
+          const next = new Set(hiddenKeys);
+          for (const t of data) {
+            if (!t.meta) continue;
+            if (t.visible === 'legendonly') next.add(t.meta);
+            else next.delete(t.meta);
+          }
+          const changed = next.size !== hiddenKeys.size || [...next].some((k) => !hiddenKeys.has(k));
+          if (changed) saveHidden(next);
         }}
       />
     </div>

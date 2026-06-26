@@ -11,6 +11,9 @@ import { ScrapeInterval } from '@/components/ScrapeInterval';
 import { AggregatorPicker } from '@/components/AggregatorPicker';
 import { TrackerLabel } from '@/components/TrackerLabel';
 import { ChartActions } from '@/components/ChartActions';
+import { AlertsButton, type FlightOption } from '@/components/AlertsButton';
+import { currencySymbol } from '@/lib/currency';
+import { SearchCriteria } from '@/components/SearchCriteria/SearchCriteria';
 import { PriceCalendar } from '@/components/PriceCalendar';
 import { Footer } from '@/components/Footer';
 import { StackedSortControls, type StackedItem } from '@/components/StackedSortControls';
@@ -81,6 +84,12 @@ interface QueryWithSnapshots {
     dateTo: Date;
     flexibility: number;
     tripType: string;
+    timePreference: string;
+    cabinClass: string;
+    maxStops: number | null;
+    maxPrice: number | null;
+    maxDurationHours: number | null;
+    preferredAirlines: string[];
     active: boolean;
     expiresAt: Date;
     createdAt: Date;
@@ -138,7 +147,7 @@ function renderRouteBlock(qData: QueryWithSnapshots, isMultiRoute: boolean) {
       )}
 
       <section className={styles.chart}>
-        <PriceChart snapshots={qData.snapshots} currency={qData.query.currency ?? 'USD'} />
+        <PriceChart snapshots={qData.snapshots} currency={qData.query.currency ?? 'USD'} trackerId={qData.query.id} />
         {qData.query.vpnCountries.length > 0 && !qData.snapshots.some((s) => s.vpnCountry) && (
           <p className={styles.vpnPending}>
             VPN comparison in progress -- prices from {qData.query.vpnCountries.map((c) =>
@@ -149,11 +158,11 @@ function renderRouteBlock(qData: QueryWithSnapshots, isMultiRoute: boolean) {
       </section>
 
       <section className={styles.best}>
-        <BestPrice snapshots={qData.snapshots} />
+        <BestPrice snapshots={qData.snapshots} trackerId={qData.query.id} />
       </section>
 
       <section className={styles.history}>
-        <PriceHistory snapshots={qData.snapshots} />
+        <PriceHistory snapshots={qData.snapshots} trackerId={qData.query.id} />
       </section>
 
       <section className={styles.calendar}>
@@ -249,6 +258,23 @@ async function loadQueryWithSnapshots(id: string): Promise<QueryWithSnapshots | 
     lastRun,
     globalScrapeInterval: globalConfig?.scrapeInterval ?? 3,
   };
+}
+
+/** Distinct flights in a tracker (for the alert popup's per-flight scope picker),
+ * keyed by flightId and labelled by airline + departure time. */
+function deriveFlightOptions(
+  snapshots: Array<{ airline: string; flightId: string | null; departureTime: string | null; scrapedAt: string }>,
+): FlightOption[] {
+  const latest = new Map<string, { label: string; scrapedAt: string }>();
+  for (const s of snapshots) {
+    if (!s.flightId) continue;
+    const label = s.departureTime ? `${s.airline} · ${s.departureTime}` : s.airline;
+    const prev = latest.get(s.flightId);
+    if (!prev || s.scrapedAt > prev.scrapedAt) latest.set(s.flightId, { label, scrapedAt: s.scrapedAt });
+  }
+  return Array.from(latest.entries())
+    .map(([id, v]) => ({ id, label: v.label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 export default async function ChartPage({ params }: Props) {
@@ -410,6 +436,11 @@ export default async function ChartPage({ params }: Props) {
             destination={primary.query.destination}
             snapshots={primary.snapshots}
           />
+          <AlertsButton
+            queryId={id}
+            sym={currencySymbol(primary.query.currency ?? 'USD')}
+            flights={deriveFlightOptions(primary.snapshots)}
+          />
         </div>
       </header>
 
@@ -419,6 +450,21 @@ export default async function ChartPage({ params }: Props) {
           <p>The data below is a snapshot of prices collected during the tracking period.</p>
         </div>
       ) : null}
+
+      <SearchCriteria
+        queryId={id}
+        sym={currencySymbol(primary.query.currency ?? 'USD')}
+        canEdit={canEdit}
+        initial={{
+          timePreference: primary.query.timePreference,
+          maxStops: primary.query.maxStops,
+          maxPrice: primary.query.maxPrice,
+          maxDurationHours: primary.query.maxDurationHours,
+          cabinClass: primary.query.cabinClass,
+          preferredAirlines: primary.query.preferredAirlines,
+          tripType: primary.query.tripType,
+        }}
+      />
 
       {isMultiRoute ? (
         <StackedSortControls items={allQueries.map(buildStackedItem)} />
