@@ -408,7 +408,7 @@ async function scrapeQueryForCountry(
     },
     orderBy: { scrapedAt: 'desc' },
     distinct: ['flightId'],
-    select: { flightId: true, price: true, airline: true, travelDate: true, currency: true, bookingUrl: true, stops: true, duration: true, departureTime: true, arrivalTime: true, flightNumber: true, status: true },
+    select: { flightId: true, price: true, airline: true, travelDate: true, currency: true, bookingUrl: true, stops: true, duration: true, departureTime: true, arrivalTime: true, flightNumber: true, status: true, scrapedAt: true },
   });
 
   // Match prior rows against BOTH the new and the legacy id forms so the
@@ -421,12 +421,21 @@ async function scrapeQueryForCountry(
   // not be flagged sold-out just because we did not look at them.
   const currentFlightIds = new Set(withFlightIds.map((p) => p.flightId));
   const currentLegacyIds = new Set(withFlightIds.map((p) => p.flightIdLegacy));
+  // Grace period before inferring "sold out". Google Flights surfaces a varying
+  // subset of a route's flights each scrape (e.g. 3 one run, 8 the next), so a
+  // flight simply missing from ONE scrape is usually just unlisted, not sold out.
+  // Only flag it after it has been continuously absent this long, so a
+  // fluctuating result set doesn't churn out a pile of false sold-outs.
+  const SOLD_OUT_GRACE_MS = 6 * 60 * 60 * 1000;
+  const nowMs = Date.now();
   const soldOutSnapshots = previousSnapshots
     .filter((prev) => {
       if (!prev.flightId || prev.status !== 'available') return false;
       const prevTravelIso = prev.travelDate.toISOString().slice(0, 10);
       if (!scrapedTravelDates.has(prevTravelIso)) return false;
-      return !currentFlightIds.has(prev.flightId) && !currentLegacyIds.has(prev.flightId);
+      if (currentFlightIds.has(prev.flightId) || currentLegacyIds.has(prev.flightId)) return false;
+      // Still within grace since it was last seen available → leave it as-is.
+      return nowMs - prev.scrapedAt.getTime() >= SOLD_OUT_GRACE_MS;
     })
     .map((prev) => ({
       queryId,
