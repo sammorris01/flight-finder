@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { detectNewLow } from './detect';
 import { formatNewLowMessage } from './format';
 import { dispatchNotifications } from './notify';
+import { queriesWithEnabledRules } from './rules';
 
 /**
  * Base URL for deep links in notifications. Precedence: admin-configured
@@ -36,7 +37,13 @@ export async function notifyNewLows(queryIds: string[], cycleStartedAt: Date): P
   const floorPct = config?.notifyMinDropPct ?? 0;
   const baseUrl = resolveBaseUrl(config?.publicBaseUrl);
 
+  // Trackers with their own alert rules are owned by the rule engine
+  // (evaluateAndNotifyRules); skip them here so they don't also fire the generic
+  // new-low alert and double-notify.
+  const ruled = await queriesWithEnabledRules(ids);
+
   for (const queryId of ids) {
+    if (ruled.has(queryId)) continue;
     try {
       const query = await prisma.query.findUnique({
         where: { id: queryId },

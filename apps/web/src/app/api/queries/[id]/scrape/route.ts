@@ -5,6 +5,7 @@ import { authorizeMutation } from '@/lib/query-auth';
 import { redis } from '@/lib/redis';
 import { runFullScrapeForQuery } from '@/lib/scraper/run-scrape';
 import { notifyNewLows } from '@/lib/notifications/run';
+import { evaluateAndNotifyRules } from '@/lib/notifications/rules';
 
 const THROTTLE_SECONDS = 60;
 // A multi-VPN run can stretch past 10 minutes per sibling. Anything older
@@ -215,6 +216,7 @@ export async function POST(
     // this run. Isolated so a notification failure never affects the scrape.
     try {
       await notifyNewLows(succeededIds, cycleStartedAt);
+      await evaluateAndNotifyRules(succeededIds, cycleStartedAt);
     } catch (err) {
       console.error(`[notify] manual run notification pass failed: ${err instanceof Error ? err.message : err}`);
     }

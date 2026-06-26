@@ -4,6 +4,7 @@ import { apiSuccess, apiError } from '@/lib/api-response';
 import { runScrapeAll, cleanupUnvisitedQueries } from '@/lib/scraper/run-scrape';
 import { expireDepartedQueries } from '@/lib/scraper/expire-queries';
 import { notifyNewLows } from '@/lib/notifications/run';
+import { evaluateAndNotifyRules } from '@/lib/notifications/rules';
 
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
@@ -48,6 +49,7 @@ export async function GET(request: NextRequest) {
   try {
     const successfulQueryIds = results.filter((r) => r.status === 'success').map((r) => r.queryId);
     await notifyNewLows(successfulQueryIds, cycleStartedAt);
+    await evaluateAndNotifyRules(successfulQueryIds, cycleStartedAt);
   } catch (err) {
     console.error(`[notify] cron notification pass failed: ${err instanceof Error ? err.message : err}`);
   }

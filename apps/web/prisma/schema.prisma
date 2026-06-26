@@ -44,6 +44,7 @@ model Query {
 
   snapshots PriceSnapshot[]
   fetchRuns FetchRun[]
+  alertRules AlertRule[]
   user      User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([active])
@@ -51,6 +52,32 @@ model Query {
   @@index([isSeed])
   @@index([groupId])
   @@index([userId])
+}
+
+// User-defined price alert. Scope is the whole tracker (flightId null) or one
+// specific flight (flightId set). Fires when price <= targetPrice, OR drops by
+// >= dropAbs, OR by >= dropPct, drops measured from baselinePrice (captured at
+// creation, re-armed lower after each drop alert). See lib/notifications/rules.ts.
+model AlertRule {
+  id                String    @id @default(cuid())
+  queryId           String
+  flightId          String?   // null = whole tracker; set = one flight (PriceSnapshot.flightId)
+  flightLabel       String?   // human label captured at creation, e.g. "British Airways · 6:40 AM"
+  targetPrice       Float?    // notify when the price is at or below this
+  dropAbs           Float?    // notify on a drop of >= this absolute amount from baselinePrice
+  dropPct           Float?    // notify on a drop of >= this fraction (0..1) from baselinePrice
+  baselinePrice     Float?    // price when created; re-armed lower after each drop alert
+  currency          String?
+  enabled           Boolean   @default(true)
+  lastNotifiedPrice Float?    // dedupe / re-arm: last price we alerted for this rule
+  lastNotifiedAt    DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  query Query @relation(fields: [queryId], references: [id], onDelete: Cascade)
+
+  @@index([queryId])
+  @@index([queryId, flightId])
 }
 
 model PriceSnapshot {
