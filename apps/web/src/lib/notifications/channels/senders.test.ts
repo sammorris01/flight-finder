@@ -18,6 +18,7 @@ import { sendTelegram } from './telegram';
 import { sendNtfy } from './ntfy';
 import { sendWebhook } from './webhook';
 import { sendEmail } from './email';
+import { sendPushover } from './pushover';
 import type { ChannelMessage } from './types';
 
 const MESSAGE: ChannelMessage = {
@@ -213,6 +214,44 @@ describe('sendWebhook', () => {
     await sendWebhook({ url: 'https://hook.example/x' }, MESSAGE, { trusted: true });
     const [, init] = fetchMock.mock.calls[0]!;
     expect(init.redirect).toBeUndefined();
+  });
+});
+
+describe('sendPushover', () => {
+  it('POSTs a form-encoded message to the Pushover API with token, user, title and body', async () => {
+    await sendPushover({ token: 'APP', user: 'USR' }, MESSAGE);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('https://api.pushover.net/1/messages.json');
+    expect(init.method).toBe('POST');
+    expect(init.headers['Content-Type']).toBe('application/x-www-form-urlencoded');
+    const body = new URLSearchParams(init.body);
+    expect(body.get('token')).toBe('APP');
+    expect(body.get('user')).toBe('USR');
+    expect(body.get('title')).toBe('New low: LHR to JFK $250');
+    expect(body.get('message')).toBe(MESSAGE.body);
+    expect(body.get('url')).toBe('https://flights.example/q/abc');
+    expect(body.get('url_title')).toBe('View flight');
+  });
+
+  it('includes the device and priority only when configured', async () => {
+    await sendPushover({ token: 'APP', user: 'USR', device: 'iphone', priority: 1 }, MESSAGE);
+    const body = new URLSearchParams(fetchMock.mock.calls[0]![1].body);
+    expect(body.get('device')).toBe('iphone');
+    expect(body.get('priority')).toBe('1');
+  });
+
+  it('omits the url fields and optional config when absent', async () => {
+    await sendPushover({ token: 'APP', user: 'USR' }, { ...MESSAGE, url: '' });
+    const body = new URLSearchParams(fetchMock.mock.calls[0]![1].body);
+    expect(body.has('url')).toBe(false);
+    expect(body.has('url_title')).toBe(false);
+    expect(body.has('device')).toBe(false);
+    expect(body.has('priority')).toBe(false);
+  });
+
+  it('throws with the status when Pushover rejects the request', async () => {
+    fetchMock.mockResolvedValue(errResponse(400, 'invalid token'));
+    await expect(sendPushover({ token: 'bad', user: 'USR' }, MESSAGE)).rejects.toThrow(/400/);
   });
 });
 
