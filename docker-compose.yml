@@ -59,8 +59,12 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - app-data:/app/data
-      # Uncomment to use Claude Code CLI from your host machine:
-      # - ~/.claude:/home/node/.claude-host:ro
+      # Claude Code CLI auth from the host (subscription login, no API key).
+      # Mounted READ-WRITE directly at ~/.claude (not the :ro copy) so in-container
+      # token refreshes persist back to the host and the OAuth refresh token stays
+      # in sync across restarts. A read-only copy goes stale when the token rotates,
+      # which logs the CLI out within ~a day. Host & container both run uid 1000.
+      - /home/sm-server-admin/.claude:/home/node/.claude
       # Uncomment to use Codex CLI from your host machine:
       # - ~/.codex:/home/node/.codex-host:ro
 
