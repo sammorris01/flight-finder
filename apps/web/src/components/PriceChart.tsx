@@ -299,20 +299,29 @@ export function PriceChart({
           paper_bgcolor: 'transparent',
           plot_bgcolor: 'transparent',
           font: { family: 'IBM Plex Mono, monospace', color: '#8b9ec2', size: 11 },
-          margin: { t: 20, r: 20, b: 50, l: 60 },
+          margin: { t: 20, r: 150, b: 44, l: 60 },
           xaxis: {
             gridcolor: '#243049',
             tickformat: '%b %d %H:%M',
             title: { text: '' },
+            // Lock the view to the data: no pan/zoom/scroll beyond the axis.
+            fixedrange: true,
           },
           yaxis: {
             gridcolor: '#243049',
             tickprefix: sym,
             title: { text: '' },
+            // Lock the price axis too (also stops dragging into negative prices).
+            fixedrange: true,
           },
           legend: {
-            orientation: 'h',
-            y: -0.15,
+            // Vertical column on the right reads cleanly with the airline group
+            // headings; the horizontal layout crowded the titles into the entries.
+            orientation: 'v',
+            x: 1.02,
+            xanchor: 'left',
+            y: 1,
+            yanchor: 'top',
             font: { size: 11 },
             // Clicking a flight toggles just that flight; clicking the airline
             // heading toggles the whole group.
@@ -334,6 +343,7 @@ export function PriceChart({
         config={{
           responsive: true,
           displayModeBar: false,
+          scrollZoom: false,
         }}
         style={{ width: '100%', height: '400px' }}
         onClick={(data) => {
