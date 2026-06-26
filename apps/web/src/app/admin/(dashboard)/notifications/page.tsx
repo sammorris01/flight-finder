@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import styles from './page.module.css';
 
-type ChannelType = 'telegram' | 'email' | 'ntfy' | 'webhook';
+type ChannelType = 'telegram' | 'email' | 'ntfy' | 'webhook' | 'pushover';
 
 interface FieldDef {
   key: string;
@@ -37,6 +37,12 @@ const FIELD_DEFS: Record<ChannelType, FieldDef[]> = {
     { key: 'url', label: 'Webhook URL', type: 'text', placeholder: 'https://...' },
     { key: 'secret', label: 'HMAC signing secret', type: 'password', optional: true, secret: true },
   ],
+  pushover: [
+    { key: 'token', label: 'Application API token', type: 'password', secret: true },
+    { key: 'user', label: 'User/group key', type: 'password', secret: true },
+    { key: 'device', label: 'Device name', type: 'text', placeholder: 'all devices', optional: true },
+    { key: 'priority', label: 'Priority (-2 to 1)', type: 'number', placeholder: '0', optional: true },
+  ],
 };
 
 const TYPE_LABELS: Record<ChannelType, string> = {
@@ -44,6 +50,7 @@ const TYPE_LABELS: Record<ChannelType, string> = {
   email: 'Email',
   ntfy: 'ntfy',
   webhook: 'Webhook',
+  pushover: 'Pushover',
 };
 
 type FormValues = Record<string, string | boolean>;

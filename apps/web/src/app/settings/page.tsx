@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { AvatarPicker } from '@/components/AvatarPicker/AvatarPicker';
 import { ThemePicker } from '@/components/ThemePicker/ThemePicker';
 import { ReachGuide } from '@/components/ReachGuide/ReachGuide';
+import { PushoverSettings } from '@/components/PushoverSettings/PushoverSettings';
 import { PROVIDER_METADATA, LOCAL_PROVIDERS, CLI_PROVIDERS } from '@/lib/scraper/provider-metadata';
 import { isThemeId, DEFAULT_THEME, type ThemeId } from '@/lib/theme';
 import styles from './page.module.css';
@@ -237,6 +238,15 @@ export default function SettingsPage() {
           />
 
           {themeMessage && <span className={styles.message}>{themeMessage}</span>}
+        </div>
+
+        <div className={styles.section} id="notifications">
+          <h2 className={styles.sectionTitle}>Notifications</h2>
+          <p className={styles.toggleHint}>
+            Get a Pushover push on your phone when a price alert fires. Set the
+            alerts themselves from the bell (🔔) on each tracker.
+          </p>
+          <PushoverSettings />
         </div>
 
         {config.isSelfHosted && (

@@ -51,6 +51,26 @@ describe('validateChannelConfig', () => {
   it('rejects a non-object config', () => {
     expect(() => validateChannelConfig('webhook', 'http://x')).toThrow(/object/);
   });
+
+  it('validates a minimal pushover config and omits unset optionals', () => {
+    expect(validateChannelConfig('pushover', { token: 'APP', user: 'USR' })).toEqual({
+      token: 'APP',
+      user: 'USR',
+    });
+  });
+
+  it('coerces and keeps a valid pushover priority and device', () => {
+    const cfg = validateChannelConfig('pushover', { token: 'APP', user: 'USR', device: 'iphone', priority: '1' });
+    expect(cfg).toEqual({ token: 'APP', user: 'USR', device: 'iphone', priority: 1 });
+  });
+
+  it('rejects an out-of-range pushover priority (emergency 2 is unsupported)', () => {
+    expect(() => validateChannelConfig('pushover', { token: 'APP', user: 'USR', priority: 2 })).toThrow(/priority/);
+  });
+
+  it('requires the pushover user key', () => {
+    expect(() => validateChannelConfig('pushover', { token: 'APP' })).toThrow(/user/);
+  });
 });
 
 describe('encrypt/decrypt channel config', () => {
@@ -73,6 +93,7 @@ describe('encrypt/decrypt channel config', () => {
       email: ['pass'],
       ntfy: ['token'],
       webhook: ['secret'],
+      pushover: ['token', 'user'],
     });
   });
 });

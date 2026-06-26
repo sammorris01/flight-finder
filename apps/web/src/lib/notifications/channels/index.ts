@@ -4,6 +4,7 @@ import { sendTelegram } from './telegram';
 import { sendEmail } from './email';
 import { sendNtfy } from './ntfy';
 import { sendWebhook } from './webhook';
+import { sendPushover } from './pushover';
 
 /**
  * A channel owned by `userId: null` is admin/global and trusted with internal
@@ -34,6 +35,9 @@ export async function sendToChannel(channel: SendChannel, message: ChannelMessag
       return sendNtfy(decryptChannelConfig('ntfy', channel.config), message, { trusted });
     case 'webhook':
       return sendWebhook(decryptChannelConfig('webhook', channel.config), message, { trusted });
+    case 'pushover':
+      // Fixed public host (api.pushover.net) — no per-user SSRF surface, like Telegram.
+      return sendPushover(decryptChannelConfig('pushover', channel.config), message);
     default:
       throw new Error(`Unknown channel type: ${channel.type as string}`);
   }

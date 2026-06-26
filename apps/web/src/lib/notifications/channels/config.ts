@@ -9,9 +9,10 @@ import type {
   EmailConfig,
   NtfyConfig,
   WebhookConfig,
+  PushoverConfig,
 } from './types';
 
-export const CHANNEL_TYPES: ChannelType[] = ['telegram', 'email', 'ntfy', 'webhook'];
+export const CHANNEL_TYPES: ChannelType[] = ['telegram', 'email', 'ntfy', 'webhook', 'pushover'];
 
 /** Secret fields per channel type — encrypted at rest, redacted on read. */
 export const SECRET_FIELDS: Record<ChannelType, string[]> = {
@@ -19,6 +20,7 @@ export const SECRET_FIELDS: Record<ChannelType, string[]> = {
   email: ['pass'],
   ntfy: ['token'],
   webhook: ['secret'],
+  pushover: ['token', 'user'],
 };
 
 export function isChannelType(v: unknown): v is ChannelType {
@@ -76,6 +78,21 @@ function validateWebhook(o: Record<string, unknown>): WebhookConfig {
   return { url: reqStr(o, 'url'), secret: optStr(o, 'secret') };
 }
 
+function validatePushover(o: Record<string, unknown>): PushoverConfig {
+  const config: PushoverConfig = { token: reqStr(o, 'token'), user: reqStr(o, 'user') };
+  const device = optStr(o, 'device');
+  if (device) config.device = device;
+  if (o.priority != null && o.priority !== '') {
+    const priority = typeof o.priority === 'number' ? o.priority : Number(o.priority);
+    // Emergency priority (2) needs retry/expire bookkeeping we don't model, so cap at 1.
+    if (!Number.isInteger(priority) || priority < -2 || priority > 1) {
+      throw new Error('config.priority must be an integer between -2 and 1');
+    }
+    config.priority = priority;
+  }
+  return config;
+}
+
 /** Validate + normalise a raw config object into the typed shape for `type`. */
 export function validateChannelConfig<T extends ChannelType>(type: T, raw: unknown): ChannelConfigMap[T] {
   const o = obj(raw);
@@ -88,6 +105,8 @@ export function validateChannelConfig<T extends ChannelType>(type: T, raw: unkno
       return validateNtfy(o) as ChannelConfigMap[T];
     case 'webhook':
       return validateWebhook(o) as ChannelConfigMap[T];
+    case 'pushover':
+      return validatePushover(o) as ChannelConfigMap[T];
     default:
       throw new Error(`Unknown channel type: ${type as string}`);
   }
