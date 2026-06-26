@@ -1,5 +1,4 @@
 import { PriceHistorySection } from './PriceHistorySection';
-import { FilterBar } from './FilterBar/FilterBar';
 import styles from './PriceHistory.module.css';
 
 export interface Snapshot {
@@ -56,7 +55,6 @@ export function PriceHistory({ snapshots, trackerId }: { snapshots: Snapshot[]; 
   return (
     <div className={styles.root}>
       <h3 className={styles.title}>Results</h3>
-      <FilterBar trackerId={trackerId} />
       {countryGroups.map(([key, items]) => (
         <div key={key}>
           {hasCountryData && <div className={styles.countryHeader}>{countryLabel(key)}</div>}

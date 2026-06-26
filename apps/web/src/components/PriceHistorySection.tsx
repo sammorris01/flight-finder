@@ -182,30 +182,19 @@ function FlightRow({
  */
 export function PriceHistorySection({ snapshots, trackerId }: { snapshots: Snapshot[]; trackerId?: string }) {
   const [expanded, setExpanded] = useState(false);
-  const { isHidden, toggle, passes } = useTrackerView(trackerId);
+  const { isHidden, toggle } = useTrackerView(trackerId);
   if (snapshots.length === 0) return null;
 
-  // Apply the active departure/arrival/stops filters. Hidden flights stay (just
-  // dimmed); a flight that FAILS a filter is dropped from the list entirely.
-  const filtered = snapshots.filter((s) => passes(s));
-  if (filtered.length === 0) {
-    return (
-      <div className={styles.section}>
-        <div className={styles.caption}>No flights match the current filters.</div>
-      </div>
-    );
-  }
-
-  const previousMap = buildPreviousMap(filtered);
+  const previousMap = buildPreviousMap(snapshots);
 
   // Latest scrape: every snapshot stamped with the most recent scrapedAt. One
   // createMany per run shares a timestamp, so this is exactly that run's flights.
-  const latestScrapedAt = filtered.reduce(
+  const latestScrapedAt = snapshots.reduce(
     (max, s) => (s.scrapedAt > max ? s.scrapedAt : max),
-    filtered[0]!.scrapedAt,
+    snapshots[0]!.scrapedAt,
   );
   const current = Array.from(
-    filtered
+    snapshots
       .filter((s) => s.scrapedAt === latestScrapedAt)
       .reduce((m, s) => {
         const existing = m.get(flightKey(s));
@@ -215,13 +204,13 @@ export function PriceHistorySection({ snapshots, trackerId }: { snapshots: Snaps
       .values(),
   ).sort((a, b) => (a.price !== b.price ? a.price - b.price : a.airline.localeCompare(b.airline)));
 
-  const history = [...filtered].sort((a, b) => {
+  const history = [...snapshots].sort((a, b) => {
     const t = new Date(b.scrapedAt).getTime() - new Date(a.scrapedAt).getTime();
     return t !== 0 ? t : a.price - b.price;
   });
   const shownHistory = history.slice(0, MAX_HISTORY_ROWS);
   const hiddenCount = history.length - shownHistory.length;
-  const hasHistory = filtered.length > current.length;
+  const hasHistory = snapshots.length > current.length;
 
   return (
     <div className={styles.section}>
@@ -268,7 +257,7 @@ export function PriceHistorySection({ snapshots, trackerId }: { snapshots: Snaps
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
         >
-          {expanded ? 'Hide full history' : `Show full history (${filtered.length} checks)`}
+          {expanded ? 'Hide full history' : `Show full history (${snapshots.length} checks)`}
         </button>
       )}
 

@@ -229,7 +229,7 @@ export function PriceChart({
 
   // Per-tracker hidden-flight state, shared with the Price History list (keyed by
   // flightId) so the chart legend and the list toggle together and persist.
-  const { hidden: hiddenKeys, setHidden: saveHidden, passes } = useTrackerView(trackerId);
+  const { hidden: hiddenKeys, setHidden: saveHidden } = useTrackerView(trackerId);
 
   // The live Plotly graph div, captured once, so onRestyle can read the actual
   // per-trace visibility after any legend interaction.
@@ -244,16 +244,12 @@ export function PriceChart({
     return snapshots.filter((s) => s.vpnCountry === view);
   }, [snapshots, view]);
 
-  // Apply the active departure/arrival/stops filters: a flight that fails drops
-  // off the chart entirely (consistent with the Results list and Best Price).
-  const viewSnapshots = useMemo(() => filteredSnapshots.filter((s) => passes(s)), [filteredSnapshots, passes]);
-
   const traces = useMemo(() => {
     if (view === 'comparison') {
-      return buildComparisonTraces(viewSnapshots, sym);
+      return buildComparisonTraces(filteredSnapshots, sym);
     }
-    return buildDetailTraces(viewSnapshots, sym, hasVpnData && view === 'all');
-  }, [viewSnapshots, sym, view, hasVpnData]);
+    return buildDetailTraces(filteredSnapshots, sym, hasVpnData && view === 'all');
+  }, [filteredSnapshots, sym, view, hasVpnData]);
 
   // Apply remembered visibility: a hidden flight renders as `legendonly`.
   const displayTraces = useMemo(

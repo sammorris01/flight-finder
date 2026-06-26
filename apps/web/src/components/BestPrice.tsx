@@ -26,15 +26,14 @@ function keyOf(s: Snapshot): string {
 }
 
 export function BestPrice({ snapshots, trackerId }: { snapshots: Snapshot[]; trackerId?: string }) {
-  const { isHidden, passes } = useTrackerView(trackerId);
+  const { isHidden } = useTrackerView(trackerId);
 
   // Sold-out snapshots carry the last seen price (run-scrape.ts marks the row
   // sold_out but copies the prior price). The listing is no longer bookable, so
   // excluding them keeps a vanished cheap fare from outranking real ones. Also
-  // exclude flights the user has hidden or filtered out, so "best price" reflects
-  // exactly the flights currently in view.
+  // exclude flights the user has hidden, so "best price" reflects what's in view.
   const bookable = snapshots.filter(
-    (s) => s.status !== 'sold_out' && passes(s) && !isHidden(keyOf(s)),
+    (s) => s.status !== 'sold_out' && !isHidden(keyOf(s)),
   );
   if (bookable.length === 0) return null;
 
