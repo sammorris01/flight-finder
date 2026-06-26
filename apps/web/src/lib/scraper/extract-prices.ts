@@ -75,7 +75,7 @@ function buildSystemPrompt(filters: QueryFilters, maxResults: number, source: Na
       evening: 'departing after 6:00 PM',
       redeye: 'departing after 10:00 PM (red-eye flights)',
     };
-    filterRules.push(`- Prefer flights ${timeMap[filters.timePreference] ?? ''}`);
+    filterRules.push(`- ONLY include flights ${timeMap[filters.timePreference] ?? ''}`);
   }
 
   const filterSection = filterRules.length > 0
@@ -397,6 +397,39 @@ export interface ExtractionConfigOverride {
   apiKey?: string;
 }
 
+/** Parse a "6:40 AM" / "1:55 PM" departure label into minutes from midnight. */
+function departureMinutes(t: string | null): number | null {
+  if (!t) return null;
+  const m = t.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  if (!m) return null;
+  let h = parseInt(m[1]!, 10);
+  const min = parseInt(m[2]!, 10);
+  const ap = m[3]?.toUpperCase();
+  if (ap === 'PM' && h !== 12) h += 12;
+  if (ap === 'AM' && h === 12) h = 0;
+  return h * 60 + min;
+}
+
+/** Whether a flight's departure falls in the requested time-of-day window. An
+ * unknown/unparseable time is kept (not filtered out), matching the duration
+ * filter's treatment of nulls. Windows mirror the prompt's timeMap. */
+function inTimeWindow(departureTime: string | null, pref: string): boolean {
+  const m = departureMinutes(departureTime);
+  if (m === null) return true;
+  switch (pref) {
+    case 'morning':
+      return m < 12 * 60; // before 12:00 PM
+    case 'afternoon':
+      return m >= 12 * 60 && m <= 18 * 60; // 12:00 PM–6:00 PM
+    case 'evening':
+      return m > 18 * 60; // after 6:00 PM
+    case 'redeye':
+      return m >= 22 * 60; // 10:00 PM onwards
+    default:
+      return true;
+  }
+}
+
 export async function extractPrices(
   html: string,
   searchUrl: string,
@@ -536,6 +569,20 @@ ${UNTRUSTED_CLOSE}`;
     return { prices: [], usage: result.usage, failureReason: 'all_filtered_out' };
   }
 
-  console.log(`[extract] OK — ${durationFiltered.length} flights extracted (cheapest: $${durationFiltered[0]?.price})`);
-  return { prices: durationFiltered, usage: result.usage };
+  // Enforce the departure time-of-day filter deterministically in code. The LLM
+  // does not reliably honor "ONLY include morning flights" from the prompt alone
+  // (it inconsistently parses each clock time), so the prompt rule is a hint and
+  // this is the real gate — same approach as the duration filter above.
+  const timeFiltered =
+    filters.timePreference && filters.timePreference !== 'any'
+      ? durationFiltered.filter((p) => inTimeWindow(p.departureTime, filters.timePreference))
+      : durationFiltered;
+
+  if (timeFiltered.length === 0) {
+    console.log(`[extract] FAIL all_filtered_out — time-of-day filter (${filters.timePreference}) removed all ${durationFiltered.length} flights`);
+    return { prices: [], usage: result.usage, failureReason: 'all_filtered_out' };
+  }
+
+  console.log(`[extract] OK — ${timeFiltered.length} flights extracted (cheapest: $${timeFiltered[0]?.price})`);
+  return { prices: timeFiltered, usage: result.usage };
 }
