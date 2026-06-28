@@ -357,10 +357,13 @@ async function scrapeQueryForCountry(
     }
   }
 
-  // Deduplicate by airline + price + date + vpnCountry
+  // Deduplicate true duplicates only. Include departureTime so two distinct
+  // flights on the same airline that happen to share a price (e.g. two BA
+  // departures both £293) are BOTH kept — keying on airline+price alone
+  // collapsed them into one.
   const seen = new Set<string>();
   allPrices = allPrices.filter((p) => {
-    const key = `${p.airline}:${p.price}:${p.travelDate}:${vpnCountry ?? ''}`;
+    const key = `${p.airline}:${p.price}:${p.travelDate}:${p.departureTime ?? ''}:${vpnCountry ?? ''}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
